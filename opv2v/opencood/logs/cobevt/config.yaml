@@ -2,10 +2,10 @@ name: cobevt
 root_dir: '../../dataset/test/'
 validate_dir: '../../dataset/test/'
 train_params:
-  batch_size: &batch_size 2
-  epoches: &epoches 151 # we do early stop at 90
-  eval_freq: 5
-  save_freq: 5
+  batch_size: &batch_size 1
+  epoches: &epoches 97 # we do early stop at 90
+  eval_freq: 1
+  save_freq: 1
   max_cav: &max_cav 5
   visible: true
 
