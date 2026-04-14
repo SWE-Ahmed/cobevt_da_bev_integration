@@ -109,11 +109,11 @@ class CorpBEVT(nn.Module):
         # Note: You can override these in your cobevt.yaml by adding `uda_iv_channels` 
         # and `uda_bev_channels` to the top level of the config file. 
         # Defaulting to 256 for both, which is standard for CoBEVT ResNet output and fusion output.
-        iv_dim = config.get('uda_iv_channels', 256)
+        iv_dim = config["uda_iv_channels"]
         
         # If naive compressor is used, the channel size drops to 128 before fusion.
         default_bev_dim = 128 if self.compression else 256
-        bev_dim = config.get('uda_bev_channels', default_bev_dim)
+        bev_dim = config["uda_bev_channels"]
         
         self.iv_discriminator = SpatialDomainDiscriminator(in_channels=iv_dim)
         self.bev_discriminator = SpatialDomainDiscriminator(in_channels=bev_dim)
@@ -134,9 +134,19 @@ class CorpBEVT(nn.Module):
         batch_dict.update({'features': x})
         
         # --- DA-BEV MODIFICATION START ---
-        # ResnetEncoder returns a list of multi-scale features. We take the last one (highest semantic level).
+        # ResnetEncoder returns a list of multi-scale features. We take the last one.
         img_features = x[-1] if isinstance(x, (list, tuple)) else x
-        domain_pred_iv = self.iv_discriminator(img_features, alpha)
+        
+        # img_features shape is [B, L, M, C, H, W]. We must flatten to 4D for Conv2D
+        B, L, M, C_dim, H_img, W_img = img_features.shape
+        img_features_4d = img_features.view(B * L * M, C_dim, H_img, W_img)
+        
+        # Forward through discriminator: outputs [B*L*M, 1]
+        domain_pred_iv_flat = self.iv_discriminator(img_features_4d, alpha)
+        
+        # Reshape and average across agents/cameras to get [B, 1] 
+        # This aligns the batch size with the BEV predictions for the QAL loss calculation
+        domain_pred_iv = domain_pred_iv_flat.view(B, L * M, -1).mean(dim=1)
         # --- DA-BEV MODIFICATION END ---
 
         x = self.fax(batch_dict)

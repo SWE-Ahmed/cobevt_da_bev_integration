@@ -125,7 +125,7 @@ venv.bak/
 .dmypy.json
 dmypy.json
 
-opv2v/opencood/logs/
+opv2v/opencood/logs/cobevt/net_epoch91.pth
 
 # Pyre type checker
 .pyre/
