@@ -37,10 +37,13 @@ class SpatialDomainDiscriminator(nn.Module):
         x = self.conv_blocks(x)
         x = x.view(x.size(0), -1)
         logits = self.classifier(x)
-        return torch.sigmoid(logits)
+        # return torch.sigmoid(logits)
+        return logits
 
+    
 def compute_da_bev_qal_loss(src_iv_pred, tgt_iv_pred, src_bev_pred, tgt_bev_pred):
-    bce = nn.BCELoss()
+    # CHANGED: Use the AMP-safe Logits loss
+    bce_logits = nn.BCEWithLogitsLoss()
     
     # Generate labels
     src_labels_iv = torch.ones_like(src_iv_pred)
@@ -49,22 +52,28 @@ def compute_da_bev_qal_loss(src_iv_pred, tgt_iv_pred, src_bev_pred, tgt_bev_pred
     src_labels_bev = torch.ones_like(src_bev_pred)
     tgt_labels_bev = torch.zeros_like(tgt_bev_pred)
     
-    # Calculate scalar BCE losses
-    loss_iv_src = bce(src_iv_pred, src_labels_iv)
-    loss_iv_tgt = bce(tgt_iv_pred, tgt_labels_iv)
+    # Calculate scalar BCE losses safely using raw logits
+    loss_iv_src = bce_logits(src_iv_pred, src_labels_iv)
+    loss_iv_tgt = bce_logits(tgt_iv_pred, tgt_labels_iv)
     
-    loss_bev_src = bce(src_bev_pred, src_labels_bev)
-    loss_bev_tgt = bce(tgt_bev_pred, tgt_labels_bev)
+    loss_bev_src = bce_logits(src_bev_pred, src_labels_bev)
+    loss_bev_tgt = bce_logits(tgt_bev_pred, tgt_labels_bev)
     
     with torch.no_grad():
+        # Convert logits to probabilities (0 to 1) for the lambda calculations
+        src_iv_prob = torch.sigmoid(src_iv_pred)
+        tgt_iv_prob = torch.sigmoid(tgt_iv_pred)
+        src_bev_prob = torch.sigmoid(src_bev_pred)
+        tgt_bev_prob = torch.sigmoid(tgt_bev_pred)
+        
         # Take the mean BEFORE addition to handle unequal CAV counts
-        mean_log_src_iv = torch.log(src_iv_pred + 1e-6).mean()
-        mean_log_tgt_iv = torch.log(1.0 - tgt_iv_pred + 1e-6).mean()
+        mean_log_src_iv = torch.log(src_iv_prob + 1e-6).mean()
+        mean_log_tgt_iv = torch.log(1.0 - tgt_iv_prob + 1e-6).mean()
         lambda_iv = torch.exp(-(mean_log_src_iv + mean_log_tgt_iv))
         lambda_iv = torch.clamp(lambda_iv, max=5.0)
 
-        mean_log_src_bev = torch.log(src_bev_pred + 1e-6).mean()
-        mean_log_tgt_bev = torch.log(1.0 - tgt_bev_pred + 1e-6).mean()
+        mean_log_src_bev = torch.log(src_bev_prob + 1e-6).mean()
+        mean_log_tgt_bev = torch.log(1.0 - tgt_bev_prob + 1e-6).mean()
         lambda_bev = torch.exp(-(mean_log_src_bev + mean_log_tgt_bev))
         lambda_bev = torch.clamp(lambda_bev, max=5.0)
 
@@ -73,3 +82,38 @@ def compute_da_bev_qal_loss(src_iv_pred, tgt_iv_pred, src_bev_pred, tgt_bev_pred
                lambda_iv * (loss_bev_src + loss_bev_tgt)
                
     return loss_qal
+    
+# def compute_da_bev_qal_loss(src_iv_pred, tgt_iv_pred, src_bev_pred, tgt_bev_pred):
+#     bce = nn.BCELoss()
+    
+#     # Generate labels
+#     src_labels_iv = torch.ones_like(src_iv_pred)
+#     tgt_labels_iv = torch.zeros_like(tgt_iv_pred)
+    
+#     src_labels_bev = torch.ones_like(src_bev_pred)
+#     tgt_labels_bev = torch.zeros_like(tgt_bev_pred)
+    
+#     # Calculate scalar BCE losses
+#     loss_iv_src = bce(src_iv_pred, src_labels_iv)
+#     loss_iv_tgt = bce(tgt_iv_pred, tgt_labels_iv)
+    
+#     loss_bev_src = bce(src_bev_pred, src_labels_bev)
+#     loss_bev_tgt = bce(tgt_bev_pred, tgt_labels_bev)
+    
+#     with torch.no_grad():
+#         # Take the mean BEFORE addition to handle unequal CAV counts
+#         mean_log_src_iv = torch.log(src_iv_pred + 1e-6).mean()
+#         mean_log_tgt_iv = torch.log(1.0 - tgt_iv_pred + 1e-6).mean()
+#         lambda_iv = torch.exp(-(mean_log_src_iv + mean_log_tgt_iv))
+#         lambda_iv = torch.clamp(lambda_iv, max=5.0)
+
+#         mean_log_src_bev = torch.log(src_bev_pred + 1e-6).mean()
+#         mean_log_tgt_bev = torch.log(1.0 - tgt_bev_pred + 1e-6).mean()
+#         lambda_bev = torch.exp(-(mean_log_src_bev + mean_log_tgt_bev))
+#         lambda_bev = torch.clamp(lambda_bev, max=5.0)
+
+#     # Cross-weighted DA-BEV QAL Loss
+#     loss_qal = lambda_bev * (loss_iv_src + loss_iv_tgt) + \
+#                lambda_iv * (loss_bev_src + loss_bev_tgt)
+               
+#     return loss_qal
